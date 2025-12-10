@@ -3,7 +3,7 @@ import io
 import logging
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
@@ -37,33 +37,36 @@ def render_docx(req: RenderDocxRequest):
         if not req.html or not req.title:
             return _build_error_response("Missing html or title")
 
-        # Create DOCX in memory
-        doc = Document()
-
-        # Simple approach: use html2docx to convert HTML body into the document.
-        # This can later be improved/adjusted if needed.
+        # --- Hauptpfad: HTML in DOCX konvertieren ---
         try:
-            html2docx(req.html, doc)
+            # WICHTIG: Rückgabewert von html2docx benutzen
+            doc = html2docx(req.html)
         except Exception as e:
-            # Fallback: minimal document with title as heading
             logger.warning(
                 f"html2docx failed, falling back to simple document. Error: {e}"
             )
+            doc = Document()
             doc.add_heading(req.title, level=1)
-            doc.add_paragraph(
-                "HTML could not be fully parsed. Fallback content only."
-            )
+            doc.add_paragraph("HTML could not be fully parsed. Fallback content only.")
 
-        # Add title as metadata-ish (optional)
-        # There is no direct title metadata in python-docx, but we can
-        # at least ensure it's present as first heading if fallback is used above.
+        # --- Fallback, falls html2docx zwar lief, aber nichts Sinnvolles geschrieben hat ---
+        if not doc.paragraphs or all(not p.text.strip() for p in doc.paragraphs):
+            logger.warning("html2docx produced empty document, using plain-text fallback.")
+            plain_text = req.html
+            doc = Document()
+            doc.add_heading(req.title, level=1)
+            for line in plain_text.splitlines():
+                if line.strip():
+                    doc.add_paragraph(line.strip())
 
+        # DOCX in Memory speichern und als Base64 zurückgeben
         buffer = io.BytesIO()
         doc.save(buffer)
         buffer.seek(0)
 
         b64_data = base64.b64encode(buffer.read()).decode("utf-8")
         return RenderResponse(data=b64_data, error=False, message=None)
+
     except Exception as e:
         logger.exception("Unexpected error in /render-docx")
         return _build_error_response(f"Unexpected error while rendering DOCX: {e}")
@@ -84,7 +87,8 @@ def render_xlsx(req: RenderXlsxRequest):
         wb.remove(default_sheet)
 
         for sheet_def in req.sheets:
-            ws = wb.create_sheet(title=sheet_def.name[:31])  # Excel sheet name max length 31
+            # Excel sheet name max length 31
+            ws = wb.create_sheet(title=sheet_def.name[:31])
 
             # Write headers
             if sheet_def.headers:
@@ -100,6 +104,7 @@ def render_xlsx(req: RenderXlsxRequest):
 
         b64_data = base64.b64encode(buffer.read()).decode("utf-8")
         return RenderResponse(data=b64_data, error=False, message=None)
+
     except Exception as e:
         logger.exception("Unexpected error in /render-xlsx")
         return _build_error_response(f"Unexpected error while rendering XLSX: {e}")
