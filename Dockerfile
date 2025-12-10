@@ -6,9 +6,10 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# System dependencies (extend if html2docx / lxml needs more later)
+# System dependencies (html2docx / lxml etc. + curl für Coolify-Healthcheck)
 RUN apt-get update && apt-get install -y \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
