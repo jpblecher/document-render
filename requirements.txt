@@ -1,7 +1,1 @@
-fastapi
-uvicorn[standard]
-python-docx
-html2docx
-openpyxl
-pydantic
-orjson
+fastapiuvicorn[standard]python-docxhtml2docxopenpyxlpydanticorjson
