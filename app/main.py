@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from .models import RenderDocxRequest, RenderXlsxRequest, RenderResponse
+
 from docx import Document
 from html2docx import html2docx
 from openpyxl import Workbook
@@ -37,34 +38,32 @@ def render_docx(req: RenderDocxRequest):
         if not req.html or not req.title:
             return _build_error_response("Missing html or title")
 
-        # --- Hauptpfad: HTML in DOCX konvertieren ---
+        # --- Hauptpfad: html2docx korrekt verwenden ---
         try:
-            # WICHTIG: Rückgabewert von html2docx benutzen
-            doc = html2docx(req.html)
+            # html2docx gibt ein io.BytesIO-Objekt zurück
+            buf = html2docx(req.html, title=req.title)
+            # Sicherheitshalber auf Anfang setzen
+            buf.seek(0)
+            raw_bytes = buf.read()
+
         except Exception as e:
             logger.warning(
                 f"html2docx failed, falling back to simple document. Error: {e}"
             )
+            # Fallback: ganz simples Dokument mit Hinweis
             doc = Document()
             doc.add_heading(req.title, level=1)
-            doc.add_paragraph("HTML could not be fully parsed. Fallback content only.")
+            doc.add_paragraph(
+                "HTML could not be fully parsed. Fallback content only."
+            )
 
-        # --- Fallback, falls html2docx zwar lief, aber nichts Sinnvolles geschrieben hat ---
-        if not doc.paragraphs or all(not p.text.strip() for p in doc.paragraphs):
-            logger.warning("html2docx produced empty document, using plain-text fallback.")
-            plain_text = req.html
-            doc = Document()
-            doc.add_heading(req.title, level=1)
-            for line in plain_text.splitlines():
-                if line.strip():
-                    doc.add_paragraph(line.strip())
+            tmp = io.BytesIO()
+            doc.save(tmp)
+            tmp.seek(0)
+            raw_bytes = tmp.read()
 
-        # DOCX in Memory speichern und als Base64 zurückgeben
-        buffer = io.BytesIO()
-        doc.save(buffer)
-        buffer.seek(0)
-
-        b64_data = base64.b64encode(buffer.read()).decode("utf-8")
+        # Gemeinsamer Pfad: Bytes → Base64
+        b64_data = base64.b64encode(raw_bytes).decode("utf-8")
         return RenderResponse(data=b64_data, error=False, message=None)
 
     except Exception as e:
